@@ -127,7 +127,7 @@ def index():
 
 @app.route('/api/download/local/<path:filename>', methods=['GET'])
 def download_local(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)
 
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
@@ -193,11 +193,12 @@ def upload_file():
             
             result = cloudinary.uploader.upload(temp_path, resource_type=res_type, type=upload_type, use_filename=True, unique_filename=True, folder="themover")
             
-            # Generate a signed URL for authenticated resources
+            # Generate a signed URL for authenticated resources, forcing direct download
             signed_url, options = cloudinary.utils.cloudinary_url(
                 result["public_id"],
                 resource_type=result.get("resource_type", res_type),
                 type=upload_type,
+                flags="attachment",
                 sign_url=True
             )
             
