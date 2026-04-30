@@ -7,6 +7,7 @@ import werkzeug.utils
 
 from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 
 import cloudinary
 import cloudinary.uploader
@@ -24,6 +25,8 @@ cloudinary.config(
 
 app = Flask(__name__)
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
 UPLOAD_FOLDER = "/tmp/uploads" 
 CLOUDINARY_FILES_JSON = "cloudinary_files.json"
 
@@ -325,9 +328,60 @@ def admin_delete_all():
             else:
                 cloudinary.uploader.destroy(f['public_id'])
         except:
-            pass
-    save_files([])
-    return jsonify({"success": True})
+            c_files = load_files()
+    return jsonify({"settings": PUBLIC_SETTINGS, "files": c_files})
+
+# --- WebRTC Signaling for LAN Transfer ---
+
+# Track online uploaders: { public_id: { sid: '...', ip: '...' } }
+online_uploaders = {}
+
+def get_client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+
+@socketio.on('register_uploader')
+def handle_register(data):
+    public_id = data.get('public_id')
+    ip = get_client_ip()
+    online_uploaders[public_id] = {
+        'sid': request.sid,
+        'ip': ip
+    }
+    print(f"Registered uploader {public_id} at IP {ip}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    to_remove = [k for k, v in online_uploaders.items() if v['sid'] == request.sid]
+    for k in to_remove:
+        del online_uploaders[k]
+
+@socketio.on('request_download')
+def handle_request_download(data):
+    public_id = data.get('public_id')
+    downloader_ip = get_client_ip()
+    
+    if public_id in online_uploaders:
+        uploader = online_uploaders[public_id]
+        if uploader['ip'] == downloader_ip:
+            # IPs match! Tell the uploader to prepare WebRTC
+            print(f"IP Match! Initiating WebRTC for {public_id}")
+            emit('webrtc_initiate', {'downloader_sid': request.sid, 'public_id': public_id}, to=uploader['sid'])
+            return
+            
+    # If not online or IP differs, tell downloader to fallback to cloud
+    emit('use_cloud', {'public_id': public_id}, to=request.sid)
+
+@socketio.on('webrtc_offer')
+def handle_offer(data):
+    emit('webrtc_offer', {'offer': data['offer'], 'uploader_sid': request.sid, 'public_id': data['public_id']}, to=data['downloader_sid'])
+
+@socketio.on('webrtc_answer')
+def handle_answer(data):
+    emit('webrtc_answer', {'answer': data['answer'], 'downloader_sid': request.sid}, to=data['uploader_sid'])
+
+@socketio.on('webrtc_ice')
+def handle_ice(data):
+    emit('webrtc_ice', {'candidate': data['candidate']}, to=data['target_sid'])
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5001)
