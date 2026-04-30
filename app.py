@@ -156,16 +156,18 @@ def upload_file():
         temp_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, safe_name))
         file.save(temp_path)
         try:
-            # Force 'raw' resource type for PDFs to ensure browsers can read them properly
+            # Force 'raw' resource type and 'authenticated' type for PDFs to bypass strict security policies
             file_ext = os.path.splitext(temp_path)[1].lower()
             res_type = "raw" if file_ext == ".pdf" else "auto"
+            upload_type = "authenticated" if file_ext == ".pdf" else "upload"
             
-            result = cloudinary.uploader.upload(temp_path, resource_type=res_type, use_filename=True, unique_filename=True, folder="themover")
+            result = cloudinary.uploader.upload(temp_path, resource_type=res_type, type=upload_type, use_filename=True, unique_filename=True, folder="themover")
             
-            # Generate a signed URL to bypass Cloudinary's default restrictions
+            # Generate a signed URL for authenticated resources
             signed_url, options = cloudinary.utils.cloudinary_url(
                 result["public_id"],
                 resource_type=result.get("resource_type", res_type),
+                type=upload_type,
                 sign_url=True
             )
             
