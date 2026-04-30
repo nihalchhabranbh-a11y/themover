@@ -5,7 +5,7 @@ import threading
 from functools import wraps
 import werkzeug.utils
 
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 
 import cloudinary
@@ -99,7 +99,12 @@ def delete_old_files():
     for f in c_files:
         if now - f.get("timestamp", now) > 3600:
             try:
-                cloudinary.uploader.destroy(f['public_id'])
+                if f['public_id'].startswith('local:'):
+                    local_file = os.path.join(UPLOAD_FOLDER, f['public_id'].split('local:')[1])
+                    if os.path.exists(local_file):
+                        os.remove(local_file)
+                else:
+                    cloudinary.uploader.destroy(f['public_id'])
                 deleted_any = True
             except:
                 pass
@@ -119,6 +124,10 @@ threading.Thread(target=run_cleaner, daemon=True).start()
 @app.route('/')
 def index():
     return jsonify({"status": "API is running"})
+
+@app.route('/api/download/local/<path:filename>', methods=['GET'])
+def download_local(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
@@ -156,6 +165,26 @@ def upload_file():
         temp_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, safe_name))
         file.save(temp_path)
         try:
+            file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+            
+            # Hybrid Storage: Use local disk for files > 9.5MB (Cloudinary Free Tier limit is 10MB)
+            if file_size_mb > 9.5:
+                unique_local_name = f"{int(time.time())}_{safe_name}"
+                local_path = os.path.join(UPLOAD_FOLDER, unique_local_name)
+                os.rename(temp_path, local_path)
+                
+                c_files = load_files()
+                file_data = {
+                    "filename": file.filename,
+                    "public_id": f"local:{unique_local_name}",
+                    "url": request.host_url.rstrip('/') + f"/api/download/local/{unique_local_name}",
+                    "timestamp": time.time(),
+                    "size_mb": file_size_mb
+                }
+                c_files.append(file_data)
+                save_files(c_files)
+                return jsonify({"success": True, "file": file_data})
+
             # Force 'raw' resource type and 'authenticated' type for PDFs to bypass strict security policies
             file_ext = os.path.splitext(temp_path)[1].lower()
             res_type = "raw" if file_ext == ".pdf" else "auto"
@@ -214,7 +243,12 @@ def admin_delete():
         return jsonify({"error": "Missing public_id"}), 400
         
     try:
-        cloudinary.uploader.destroy(public_id)
+        if public_id.startswith('local:'):
+            local_file = os.path.join(UPLOAD_FOLDER, public_id.split('local:')[1])
+            if os.path.exists(local_file):
+                os.remove(local_file)
+        else:
+            cloudinary.uploader.destroy(public_id)
     except Exception as e:
         pass
         
@@ -230,7 +264,12 @@ def admin_delete_all():
     c_files = load_files()
     for f in c_files:
         try:
-            cloudinary.uploader.destroy(f['public_id'])
+            if f['public_id'].startswith('local:'):
+                local_file = os.path.join(UPLOAD_FOLDER, f['public_id'].split('local:')[1])
+                if os.path.exists(local_file):
+                    os.remove(local_file)
+            else:
+                cloudinary.uploader.destroy(f['public_id'])
         except:
             pass
     save_files([])
