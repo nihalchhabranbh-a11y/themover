@@ -36,7 +36,58 @@ def load_files():
                 return json.load(f)
         except:
             pass
-    return []
+            
+    # If JSON is missing (Render wiped the disk on sleep), rebuild it from Cloudinary API!
+    print("Database missing. Rebuilding from Cloudinary...")
+    try:
+        import datetime
+        rebuilt = []
+        
+        # Fetch public files
+        pub = cloudinary.api.resources(type="upload", prefix="themover/", max_results=100)
+        # Fetch authenticated files (PDFs)
+        auth = cloudinary.api.resources(type="authenticated", prefix="themover/", max_results=100)
+        
+        for r in pub.get('resources', []) + auth.get('resources', []):
+            dt = datetime.datetime.strptime(r['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+            
+            file_data = {
+                "filename": r.get('original_filename', 'file') + '.' + r.get('format', 'bin'),
+                "public_id": r['public_id'],
+                "url": r['secure_url'],
+                "timestamp": dt.timestamp(),
+                "size_mb": r['bytes'] / (1024 * 1024)
+            }
+            
+            # Re-sign URL if it's an authenticated file (like PDFs)
+            if r.get('type') == 'authenticated':
+                signed_url, _ = cloudinary.utils.cloudinary_url(
+                    r["public_id"],
+                    resource_type=r.get("resource_type", "image"),
+                    type="authenticated",
+                    flags="attachment",
+                    sign_url=True
+                )
+                file_data["url"] = signed_url
+            
+            # Also attach attachment flag to public URLs
+            elif r.get('type') == 'upload':
+                dl_url, _ = cloudinary.utils.cloudinary_url(
+                    r["public_id"],
+                    resource_type=r.get("resource_type", "image"),
+                    type="upload",
+                    flags="attachment"
+                )
+                file_data["url"] = dl_url
+                
+            rebuilt.append(file_data)
+            
+        save_files(rebuilt)
+        return rebuilt
+    except Exception as e:
+        print("Cloudinary Rebuild Error:", e)
+        return []
 
 def save_files(files):
     with open(CLOUDINARY_FILES_JSON, "w") as f:
