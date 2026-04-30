@@ -229,7 +229,7 @@ def upload_file():
                 file_data = {
                     "filename": file.filename,
                     "public_id": f"local:{unique_local_name}",
-                    "url": request.host_url.rstrip('/') + f"/api/download/local/{unique_local_name}",
+                    "url": request.host_url.replace('http://', 'https://').rstrip('/') + f"/api/download/local/{unique_local_name}",
                     "timestamp": time.time(),
                     "size_mb": file_size_mb
                 }
