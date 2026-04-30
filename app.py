@@ -166,9 +166,10 @@ def upload_file():
         file.save(temp_path)
         try:
             file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+            file_ext = os.path.splitext(temp_path)[1].lower()
             
-            # Hybrid Storage: Use local disk for files > 9.5MB (Cloudinary Free Tier limit is 10MB)
-            if file_size_mb > 9.5:
+            # Hybrid Storage: Use local disk for files > 9.5MB OR for PDFs (Cloudinary strictly blocks inline PDF rendering on free tiers)
+            if file_size_mb > 9.5 or file_ext == ".pdf":
                 unique_local_name = f"{int(time.time())}_{safe_name}"
                 local_path = os.path.join(UPLOAD_FOLDER, unique_local_name)
                 os.rename(temp_path, local_path)
