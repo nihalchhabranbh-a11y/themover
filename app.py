@@ -156,12 +156,16 @@ def upload_file():
         temp_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, safe_name))
         file.save(temp_path)
         try:
-            result = cloudinary.uploader.upload(temp_path, resource_type="auto", use_filename=True, unique_filename=True, folder="themover")
+            # Force 'raw' resource type for PDFs to ensure browsers can read them properly
+            file_ext = os.path.splitext(temp_path)[1].lower()
+            res_type = "raw" if file_ext == ".pdf" else "auto"
             
-            # Generate a signed URL to bypass Cloudinary's default 401 restrictions for PDFs/ZIPs
+            result = cloudinary.uploader.upload(temp_path, resource_type=res_type, use_filename=True, unique_filename=True, folder="themover")
+            
+            # Generate a signed URL to bypass Cloudinary's default restrictions
             signed_url, options = cloudinary.utils.cloudinary_url(
                 result["public_id"],
-                resource_type=result.get("resource_type", "image"),
+                resource_type=result.get("resource_type", res_type),
                 sign_url=True
             )
             
