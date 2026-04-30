@@ -47,21 +47,28 @@ def load_files():
         import datetime
         rebuilt = []
         
-        # Fetch public files
-        pub = cloudinary.api.resources(type="upload", prefix="themover/", max_results=100)
+        # Fetch public files with tags
+        pub = cloudinary.api.resources(type="upload", prefix="themover/", max_results=100, tags=True)
         # Fetch authenticated files (PDFs)
-        auth = cloudinary.api.resources(type="authenticated", prefix="themover/", max_results=100)
+        auth = cloudinary.api.resources(type="authenticated", prefix="themover/", max_results=100, tags=True)
         
         for r in pub.get('resources', []) + auth.get('resources', []):
             dt = datetime.datetime.strptime(r['created_at'], "%Y-%m-%dT%H:%M:%SZ")
             dt = dt.replace(tzinfo=datetime.timezone.utc)
             
+            # Extract group tag
+            group = 'public'
+            for t in r.get('tags', []):
+                if str(t).startswith('group_'):
+                    group = str(t).replace('group_', '')
+
             file_data = {
                 "filename": r.get('original_filename', 'file') + '.' + r.get('format', 'bin'),
                 "public_id": r['public_id'],
                 "url": r['secure_url'],
                 "timestamp": dt.timestamp(),
-                "size_mb": r['bytes'] / (1024 * 1024)
+                "size_mb": r['bytes'] / (1024 * 1024),
+                "group": group
             }
             
             # Re-sign URL if it's an authenticated file (like PDFs)
@@ -193,11 +200,17 @@ def get_settings():
     })
 
 @app.route('/api/files', methods=['GET'])
-@requires_guest_auth_if_enabled
-def list_files():
-    if not PUBLIC_SETTINGS["allow_downloads"]:
-        return jsonify({"error": "Downloads disabled"}), 403
-    return jsonify({"files": load_files()})
+def get_files():
+    if PUBLIC_SETTINGS["require_password"]:
+        auth = request.authorization
+        if not auth or auth.username != PUBLIC_SETTINGS["guest_username"] or auth.password != PUBLIC_SETTINGS["guest_password"]:
+            return Response('Could not verify your access level for that URL.', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+            
+    group_query = request.args.get('group', 'public')
+    c_files = load_files()
+    filtered_files = [f for f in c_files if f.get('group', 'public') == group_query]
+    
+    return jsonify({"settings": PUBLIC_SETTINGS, "files": filtered_files})
 
 @app.route('/api/upload', methods=['POST'])
 @requires_guest_auth_if_enabled
@@ -213,6 +226,7 @@ def upload_file():
         return jsonify({"error": "No selected file"}), 400
         
     if file:
+        group = request.form.get('group', 'public')
         safe_name = werkzeug.utils.secure_filename(file.filename)
         if not safe_name:
             safe_name = f"upload_{int(time.time())}"
@@ -235,7 +249,8 @@ def upload_file():
                     "public_id": f"local:{unique_local_name}",
                     "url": request.host_url.replace('http://', 'https://').rstrip('/') + f"/api/download/local/{unique_local_name}",
                     "timestamp": time.time(),
-                    "size_mb": file_size_mb
+                    "size_mb": file_size_mb,
+                    "group": group
                 }
                 c_files.append(file_data)
                 save_files(c_files)
@@ -246,10 +261,10 @@ def upload_file():
             res_type = "raw" if file_ext == ".pdf" else "auto"
             upload_type = "authenticated" if file_ext == ".pdf" else "upload"
             
-            result = cloudinary.uploader.upload(temp_path, resource_type=res_type, type=upload_type, use_filename=True, unique_filename=True, folder="themover")
+            result = cloudinary.uploader.upload(temp_path, resource_type=res_type, type=upload_type, use_filename=True, unique_filename=True, folder="themover", tags=[f"group_{group}"])
             
             # Generate a signed URL for authenticated resources, forcing direct download
-            signed_url, options = cloudinary.utils.cloudinary_url(
+            signed_url, _ = cloudinary.utils.cloudinary_url(
                 result["public_id"],
                 resource_type=result.get("resource_type", res_type),
                 type=upload_type,
@@ -257,13 +272,21 @@ def upload_file():
                 sign_url=True
             )
             
+            dl_url, _ = cloudinary.utils.cloudinary_url(
+                result["public_id"],
+                resource_type=result.get("resource_type", res_type),
+                type="upload",
+                flags="attachment"
+            )
+            
             c_files = load_files()
             file_data = {
                 "filename": file.filename,
                 "public_id": result["public_id"],
-                "url": signed_url,
+                "url": signed_url if upload_type == "authenticated" else dl_url,
                 "timestamp": time.time(),
-                "size_mb": os.path.getsize(temp_path) / (1024 * 1024)
+                "size_mb": file_size_mb,
+                "group": group
             }
             c_files.append(file_data)
             save_files(c_files)
