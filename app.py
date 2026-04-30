@@ -406,5 +406,13 @@ def handle_answer(data):
 def handle_ice(data):
     emit('webrtc_ice', {'candidate': data['candidate']}, to=data['target_sid'])
 
+@socketio.on('uploader_unavailable')
+def handle_uploader_unavailable(data):
+    # Mac no longer has the file in memory - immediately tell downloader to use cloud
+    downloader_sid = data.get('downloader_sid')
+    public_id = data.get('public_id')
+    if downloader_sid:
+        emit('use_cloud', {'public_id': public_id}, to=downloader_sid)
+
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5001)
