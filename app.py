@@ -385,34 +385,29 @@ def handle_request_download(data):
     
     if public_id in online_uploaders:
         uploader = online_uploaders[public_id]
-        if uploader['ip'] == downloader_ip:
-            # IPs match! Tell the uploader to prepare WebRTC
-            print(f"IP Match! Initiating WebRTC for {public_id}")
-            emit('webrtc_initiate', {'downloader_sid': request.sid, 'public_id': public_id}, to=uploader['sid'])
+        # If IPs match (same network) AND uploader is online, try relay
+        if uploader['ip'] == downloader_ip or True:  # Always try relay if uploader online
+            emit('relay_send_file', {'downloader_sid': request.sid, 'public_id': public_id}, to=uploader['sid'])
             return
-            
-    # If not online or IP differs, tell downloader to fallback to cloud
+    
+    # Uploader not online, tell downloader to use cloud
     emit('use_cloud', {'public_id': public_id}, to=request.sid)
 
-@socketio.on('webrtc_offer')
-def handle_offer(data):
-    emit('webrtc_offer', {'offer': data['offer'], 'uploader_sid': request.sid, 'public_id': data['public_id']}, to=data['downloader_sid'])
-
-@socketio.on('webrtc_answer')
-def handle_answer(data):
-    emit('webrtc_answer', {'answer': data['answer'], 'downloader_sid': request.sid}, to=data['uploader_sid'])
-
-@socketio.on('webrtc_ice')
-def handle_ice(data):
-    emit('webrtc_ice', {'candidate': data['candidate']}, to=data['target_sid'])
+@socketio.on('relay_chunk')
+def handle_relay_chunk(data, *args):
+    # Forward file chunk from uploader to downloader
+    downloader_sid = data.get('downloader_sid')
+    if downloader_sid:
+        emit('relay_chunk', data, to=downloader_sid)
 
 @socketio.on('uploader_unavailable')
 def handle_uploader_unavailable(data):
-    # Mac no longer has the file in memory - immediately tell downloader to use cloud
     downloader_sid = data.get('downloader_sid')
     public_id = data.get('public_id')
     if downloader_sid:
         emit('use_cloud', {'public_id': public_id}, to=downloader_sid)
+
+
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5001)
