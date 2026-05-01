@@ -604,6 +604,18 @@ def handle_call_leave(data):
     code = str(data.get('code', '')).upper()
     emit('call_peer_left', {'sid': request.sid}, to=code, include_self=False)
 
+# ─── Remote Desktop Control ───────────────────────────────────────────────────
+@socketio.on('register_rc_host')
+def handle_register_rc_host(data):
+    code = str(data.get('code', '')).upper()
+    emit('rc_host_available', {}, to=code, include_self=False)
+
+@socketio.on('remote_control')
+def handle_remote_control(data):
+    code = str(data.get('code', '')).upper()
+    # Route directly to the RC Agent in the workspace
+    emit('remote_control', data, to=code, include_self=False)
+
 # ─── Legacy relay (kept for backwards compat) ─────────────────────────────────
 
 online_uploaders = {}
