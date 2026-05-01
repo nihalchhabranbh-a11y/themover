@@ -547,6 +547,18 @@ def handle_rename_workspace(data):
         save_workspaces()
         emit('workspace_renamed', {'new_name': new_name}, to=code)
 
+@socketio.on('cursor_move')
+def handle_cursor_move(data):
+    code = data.get('code')
+    if code in workspaces and request.sid in workspaces[code]['members']:
+        name = workspaces[code]['members'][request.sid]['name']
+        emit('cursor_moved', {
+            'sid': request.sid,
+            'name': name,
+            'x': data.get('x'),
+            'y': data.get('y')
+        }, room=code, include_self=False)
+
 # ─── Video call signaling ─────────────────────────────────────────────────────
 
 @socketio.on('call_join')
