@@ -550,8 +550,8 @@ def handle_rename_workspace(data):
 @socketio.on('cursor_move')
 def handle_cursor_move(data):
     code = data.get('code')
-    if code in workspaces and request.sid in workspaces[code]['members']:
-        name = workspaces[code]['members'][request.sid]['name']
+    if code and code in workspace_members and request.sid in workspace_members[code]:
+        name = workspace_members[code][request.sid]['name']
         emit('cursor_moved', {
             'sid': request.sid,
             'name': name,
