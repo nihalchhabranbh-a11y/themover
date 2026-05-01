@@ -617,6 +617,56 @@ def handle_remote_control(data):
     emit('remote_control', data, to=code, include_self=False)
 
 # ─── Legacy relay (kept for backwards compat) ─────────────────────────────────
+@app.route('/agent.py')
+def get_agent():
+    agent_code = """import sys, time
+try:
+    import socketio, pyautogui
+except:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-socketio", "requests", "pyautogui", "websocket-client"])
+    import socketio, pyautogui
+
+pyautogui.FAILSAFE = True
+sio = socketio.Client()
+WS_URL = "https://themover-3r8d.onrender.com"
+WORKSPACE_CODE = sys.argv[1] if len(sys.argv) > 1 else ""
+
+@sio.event
+def connect():
+    print(f"\\n[+] Connected! Registering Host for Workspace: {WORKSPACE_CODE}")
+    sio.emit('join_workspace', {'code': WORKSPACE_CODE, 'name': 'AnyDesk_Agent'})
+    sio.emit('register_rc_host', {'code': WORKSPACE_CODE})
+
+@sio.on('remote_control')
+def on_remote_control(data):
+    if data.get('code') != WORKSPACE_CODE: return
+    action = data.get('action')
+    try:
+        if action in ['mousemove', 'mousedown', 'mouseup']:
+            x_pct, y_pct = float(data.get('x', 0)), float(data.get('y', 0))
+            w, h = pyautogui.size()
+            tx, ty = int(x_pct * w), int(y_pct * h)
+            if action == 'mousemove': pyautogui.moveTo(tx, ty, duration=0.0)
+            elif action == 'mousedown': pyautogui.mouseDown(x=tx, y=ty, button='left')
+            elif action == 'mouseup': pyautogui.mouseUp(x=tx, y=ty, button='left')
+        elif action == 'keydown':
+            key = data.get('key')
+            if key:
+                if len(key) == 1: pyautogui.press(key)
+                elif key == 'Enter': pyautogui.press('enter')
+                elif key == 'Backspace': pyautogui.press('backspace')
+                elif key == 'Tab': pyautogui.press('tab')
+                elif key == 'Escape': pyautogui.press('esc')
+    except Exception as e: pass
+
+if __name__ == '__main__':
+    if not WORKSPACE_CODE: sys.exit(1)
+    sio.connect(WS_URL)
+    print("\\n[READY] Your PC is now being shared. Move mouse to corner to abort.")
+    sio.wait()
+"""
+    return agent_code, 200, {'Content-Type': 'text/plain'}
 
 online_uploaders = {}
 
