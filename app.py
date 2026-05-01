@@ -359,6 +359,7 @@ def finalize_upload():
         c_files = load_files()
         c_files.append(file_data)
         save_files(c_files)
+        socketio.emit('file_uploaded', {'file': file_data}, to=group)
         return jsonify({"success": True, "file": file_data})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -372,10 +373,11 @@ def finalize_upload():
 def create_workspace():
     data = request.json or {}
     name = str(data.get('name', 'My Workspace')).strip()[:50]
+    admin_name = str(data.get('admin', '')).strip()[:30]
     if not name:
         return jsonify({"error": "Name required"}), 400
     code = gen_code()
-    workspaces[code] = {'name': name, 'created_at': time.time(), 'messages': []}
+    workspaces[code] = {'name': name, 'created_at': time.time(), 'messages': [], 'admin': admin_name}
     save_workspaces()
     return jsonify({"code": code, "name": name})
 
@@ -504,6 +506,46 @@ def handle_chat_message(data):
 def handle_typing(data):
     code = str(data.get('code', '')).upper()
     emit('user_typing', {'name': data.get('name', '')}, to=code, include_self=False)
+
+# ─── Workspace Admin actions ──────────────────────────────────────────────────
+
+@socketio.on('delete_file')
+def handle_delete_file(data):
+    code = str(data.get('code', '')).upper()
+    public_id = data.get('public_id')
+    name = data.get('name')
+    ws = workspaces.get(code)
+    if ws and ws.get('admin') == name:
+        try:
+            if public_id.startswith('local:'):
+                lp = os.path.join(UPLOAD_FOLDER, public_id.split('local:')[1])
+                if os.path.exists(lp): os.remove(lp)
+            else:
+                cloudinary.uploader.destroy(public_id)
+        except: pass
+        c_files = [f for f in load_files() if f['public_id'] != public_id]
+        save_files(c_files)
+        emit('file_deleted', {'public_id': public_id}, to=code)
+
+@socketio.on('kick_user')
+def handle_kick_user(data):
+    code = str(data.get('code', '')).upper()
+    target_sid = data.get('target_sid')
+    name = data.get('name')
+    ws = workspaces.get(code)
+    if ws and ws.get('admin') == name:
+        emit('you_are_kicked', {}, to=target_sid)
+
+@socketio.on('rename_workspace')
+def handle_rename_workspace(data):
+    code = str(data.get('code', '')).upper()
+    new_name = str(data.get('new_name', '')).strip()[:50]
+    name = data.get('name')
+    ws = workspaces.get(code)
+    if ws and ws.get('admin') == name and new_name:
+        ws['name'] = new_name
+        save_workspaces()
+        emit('workspace_renamed', {'new_name': new_name}, to=code)
 
 # ─── Video call signaling ─────────────────────────────────────────────────────
 
