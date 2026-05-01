@@ -407,7 +407,27 @@ def handle_uploader_unavailable(data):
     if downloader_sid:
         emit('use_cloud', {'public_id': public_id}, to=downloader_sid)
 
+# --- Xender Mode (Flash Share) Signaling ---
+xender_rooms = {}
 
+@socketio.on('xender_host')
+def handle_xender_host(data):
+    room = data.get('room')
+    if room:
+        xender_rooms[room] = request.sid
+
+@socketio.on('xender_join')
+def handle_xender_join(data):
+    room = data.get('room')
+    if room and room in xender_rooms:
+        host_sid = xender_rooms[room]
+        emit('xender_joined', {'sid': request.sid}, to=host_sid)
+
+@socketio.on('xender_signal')
+def handle_xender_signal(data):
+    target = data.get('target')
+    if target:
+        emit('xender_signal', {'signal': data.get('signal'), 'sender': request.sid}, to=target)
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5001)
