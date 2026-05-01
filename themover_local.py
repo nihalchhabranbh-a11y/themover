@@ -302,6 +302,58 @@ def handle_call_leave(data):
     code = str(data.get('code', '')).upper()
     emit('call_peer_left', {'sid': request.sid}, to=code, include_self=False)
 
+# ── Remote Desktop Control (AUTO-ENABLED in local mode) ───────────────────────
+try:
+    import pyautogui
+    pyautogui.FAILSAFE = True
+    RC_ENABLED = True
+except ImportError:
+    RC_ENABLED = False
+    try:
+        pip_install("pyautogui", "--prefer-binary")
+        import pyautogui
+        pyautogui.FAILSAFE = True
+        RC_ENABLED = True
+    except Exception:
+        RC_ENABLED = False
+
+@socketio.on('register_rc_host')
+def handle_register_rc_host(data):
+    emit('rc_host_available', {'enabled': RC_ENABLED}, to=request.sid)
+
+@socketio.on('remote_control')
+def handle_remote_control(data):
+    code = str(data.get('code', '')).upper()
+    # Broadcast to others in room
+    emit('remote_control', data, to=code, include_self=False)
+    # Also execute locally — this IS the host machine
+    if not RC_ENABLED:
+        return
+    action = data.get('action')
+    try:
+        if action in ['mousemove', 'mousedown', 'mouseup']:
+            x_pct = float(data.get('x', 0))
+            y_pct = float(data.get('y', 0))
+            w, h = pyautogui.size()
+            tx, ty = int(x_pct * w), int(y_pct * h)
+            if action == 'mousemove': pyautogui.moveTo(tx, ty, duration=0.0)
+            elif action == 'mousedown': pyautogui.mouseDown(x=tx, y=ty, button='left')
+            elif action == 'mouseup': pyautogui.mouseUp(x=tx, y=ty, button='left')
+        elif action == 'keydown':
+            key = data.get('key', '')
+            if len(key) == 1: pyautogui.press(key)
+            elif key == 'Enter': pyautogui.press('enter')
+            elif key == 'Backspace': pyautogui.press('backspace')
+            elif key == 'Tab': pyautogui.press('tab')
+            elif key == 'Escape': pyautogui.press('esc')
+            elif key == 'Space': pyautogui.press('space')
+            elif key == 'ArrowUp': pyautogui.press('up')
+            elif key == 'ArrowDown': pyautogui.press('down')
+            elif key == 'ArrowLeft': pyautogui.press('left')
+            elif key == 'ArrowRight': pyautogui.press('right')
+    except Exception:
+        pass
+
 # ── main ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     url = f"http://{LOCAL_IP}:{PORT}"
@@ -309,8 +361,13 @@ if __name__ == "__main__":
     print("=" * 52)
     print("  🚀  TheMover LOCAL MODE")
     print("=" * 52)
-    print(f"  Mac  → {url}")
+    print(f"  Mac   → {url}")
     print(f"  Phone → open the URL above in your browser")
+    if RC_ENABLED:
+        print(f"  🎮   Remote Control → ENABLED")
+        print(f"       FAILSAFE: move mouse to screen corner to abort")
+    else:
+        print(f"  🎮   Remote Control → DISABLED (pyautogui not installed)")
     print()
     print("  📱  QR Code (scan with phone camera):")
     try:
