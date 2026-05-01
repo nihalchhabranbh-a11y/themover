@@ -527,6 +527,16 @@ def handle_delete_file(data):
         save_files(c_files)
         emit('file_deleted', {'public_id': public_id}, to=code)
 
+@socketio.on('file_edit')
+def handle_file_edit(data):
+    code = str(data.get('code', '')).upper()
+    if code in workspaces:
+        emit('file_edited', {
+            'public_id': data.get('public_id'),
+            'text': data.get('text'),
+            'sid': request.sid
+        }, to=code, include_self=False)
+
 @socketio.on('kick_user')
 def handle_kick_user(data):
     code = str(data.get('code', '')).upper()
