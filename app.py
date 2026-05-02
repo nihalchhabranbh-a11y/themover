@@ -4,6 +4,7 @@ import time
 import threading
 import random
 import string
+import traceback
 from functools import wraps
 import werkzeug.utils
 
@@ -362,7 +363,7 @@ def finalize_upload():
         socketio.emit('file_uploaded', {'file': file_data}, to=group)
         return jsonify({"success": True, "file": file_data})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
     finally:
         for p in [temp_path, dest]:
             if os.path.exists(p):
