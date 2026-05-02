@@ -564,6 +564,13 @@ def handle_voice_signal(data):
     if target:
         emit('voice_signal', {**data, 'from': request.sid}, to=target)
 
+@socketio.on('voice_reaction')
+def handle_voice_reaction(data):
+    """Broadcast emoji reaction to everyone in the workspace."""
+    code = str(data.get('code', '')).upper()
+    if code:
+        emit('voice_reaction', {'emoji': data.get('emoji', '👍'), 'name': data.get('name', '')},
+             to=code, include_self=False)
 
 # ─── Live Chat ────────────────────────────────────────────────────────────────
 
