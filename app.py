@@ -366,7 +366,8 @@ def finalize_upload():
         socketio.emit('file_uploaded', {'file': file_data}, to=group)
         return jsonify({"success": True, "file": file_data})
     except Exception as e:
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+        import traceback; traceback.print_exc()  # Log to Render console only
+        return jsonify({"error": str(e)}), 500
     finally:
         for p in [temp_path, dest]:
             if os.path.exists(p):
