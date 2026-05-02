@@ -390,10 +390,14 @@ def create_workspace():
 
 @app.route('/api/workspace/<code>')
 def get_workspace(code):
-    ws = workspaces.get(code.upper())
+    code = code.upper()
+    ws = workspaces.get(code)
     if not ws:
-        return jsonify({"error": "Not found"}), 404
-    return jsonify({"code": code.upper(), "name": ws['name']})
+        # Auto-create so any code works as a room
+        workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': []}
+        save_workspaces()
+        ws = workspaces[code]
+    return jsonify({"code": code, "name": ws['name']})
 
 # ─── Admin ────────────────────────────────────────────────────────────────────
 
@@ -461,6 +465,11 @@ def handle_join_workspace(data):
 
     join_room(code)
     workspace_members.setdefault(code, {})[request.sid] = {'name': name}
+
+    # Auto-create workspace if it doesn't exist (survives server restarts)
+    if code not in workspaces:
+        workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': []}
+        save_workspaces()
 
     # Send chat history
     ws = workspaces.get(code, {})
