@@ -343,13 +343,19 @@ def finalize_upload():
 
     temp_path = os.path.join(UPLOAD_FOLDER, f"{upload_id}.part")
 
+    safe_name = werkzeug.utils.secure_filename(filename) or f"upload_{int(time.time())}"
+    dest = os.path.join(UPLOAD_FOLDER, safe_name)
+
     try:
         del chunk_uploads[upload_id]
         
         if not os.path.exists(temp_path):
             return jsonify({"error": "Temporary file missing"}), 400
 
-        file_data = _do_cloudinary_upload(temp_path, filename, group)
+        # Rename .part to actual filename so Cloudinary can detect the correct file extension
+        os.rename(temp_path, dest)
+
+        file_data = _do_cloudinary_upload(dest, filename, group)
         c_files = load_files()
         c_files.append(file_data)
         save_files(c_files)
@@ -358,9 +364,10 @@ def finalize_upload():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        if os.path.exists(temp_path):
-            try: os.remove(temp_path)
-            except: pass
+        for p in [temp_path, dest]:
+            if os.path.exists(p):
+                try: os.remove(p)
+                except: pass
 
 # ─── Workspaces ───────────────────────────────────────────────────────────────
 
