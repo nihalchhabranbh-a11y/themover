@@ -150,6 +150,12 @@ load_workspaces()
 # { CODE: { sid: { name } } }
 workspace_members = {}
 
+# ─── Voice Channels (Discord-style) ──────────────────────────────────────────
+# { CODE: { channel_name: { sid: name } } }
+voice_channels = {}
+DEFAULT_VOICE_CHANNELS = ['General', 'Work', 'Lounge']
+
+
 # ─── Chunked upload state ─────────────────────────────────────────────────────
 
 # { upload_id: { chunks: {index: path}, filename, total } }
@@ -490,13 +496,74 @@ def handle_disconnect():
             name = members[request.sid]['name']
             del members[request.sid]
             emit('user_leave', {'sid': request.sid, 'name': name}, to=code)
-            # Update member list
             ml = [{'sid': s, 'name': v['name']} for s, v in members.items()]
             emit('members_list', ml, to=code)
+    # Remove from voice channels
+    for code, channels in list(voice_channels.items()):
+        for ch, members in list(channels.items()):
+            if request.sid in members:
+                del members[request.sid]
+                _emit_voice_update(code)
+                emit('voice_peer_left', {'sid': request.sid}, to=code)
     # Legacy relay cleanup
     to_remove = [k for k, v in online_uploaders.items() if v['sid'] == request.sid]
     for k in to_remove:
         del online_uploaders[k]
+
+def _emit_voice_update(code):
+    """Send voice channel state to all members of a workspace."""
+    ch_info = {ch: [{'sid': sid, 'name': name} for sid, name in members.items()]
+               for ch, members in voice_channels.get(code, {}).items()}
+    # Always include defaults
+    for ch in DEFAULT_VOICE_CHANNELS:
+        if ch not in ch_info:
+            ch_info[ch] = []
+    emit('voice_channel_update', {'channels': ch_info}, to=code)
+
+@socketio.on('join_voice_channel')
+def handle_join_voice_channel(data):
+    code    = str(data.get('code', '')).upper()
+    channel = str(data.get('channel', 'General'))[:30]
+    name    = str(data.get('name', 'Anonymous'))[:30]
+    if not code: return
+
+    # Leave any current voice channel in this workspace
+    if code in voice_channels:
+        for ch, members in list(voice_channels[code].items()):
+            if request.sid in members:
+                del members[request.sid]
+                emit('voice_peer_left', {'sid': request.sid}, to=code)
+
+    # Join new channel
+    voice_channels.setdefault(code, {}).setdefault(channel, {})
+    existing_sids = list(voice_channels[code][channel].keys())
+    voice_channels[code][channel][request.sid] = name
+
+    # Tell existing members to initiate WebRTC with new joiner
+    for peer_sid in existing_sids:
+        emit('voice_peer_joined', {'sid': request.sid, 'name': name}, to=peer_sid)
+
+    # Broadcast updated channel list to workspace
+    _emit_voice_update(code)
+
+@socketio.on('leave_voice_channel')
+def handle_leave_voice_channel(data):
+    code = str(data.get('code', '')).upper()
+    if not code: return
+    if code in voice_channels:
+        for ch, members in list(voice_channels[code].items()):
+            if request.sid in members:
+                del members[request.sid]
+        emit('voice_peer_left', {'sid': request.sid}, to=code)
+        _emit_voice_update(code)
+
+@socketio.on('voice_signal')
+def handle_voice_signal(data):
+    """Relay WebRTC offer/answer/ICE between voice channel peers."""
+    target = data.get('target')
+    if target:
+        emit('voice_signal', {**data, 'from': request.sid}, to=target)
+
 
 # ─── Live Chat ────────────────────────────────────────────────────────────────
 
