@@ -321,11 +321,14 @@ def upload_chunk():
         return jsonify({"error": "Missing data"}), 400
 
     if upload_id not in chunk_uploads:
-        chunk_uploads[upload_id] = {'chunks': {}, 'filename': filename, 'total': total}
+        chunk_uploads[upload_id] = {'filename': filename, 'total': total, 'received': 0}
 
-    chunk_path = f"/tmp/chunk_{upload_id}_{chunk_index}"
-    chunk.save(chunk_path)
-    chunk_uploads[upload_id]['chunks'][chunk_index] = chunk_path
+    temp_path = os.path.join(UPLOAD_FOLDER, f"{upload_id}.part")
+    mode = 'ab' if chunk_index > 0 else 'wb'
+    with open(temp_path, mode) as f:
+        f.write(chunk.read())
+        
+    chunk_uploads[upload_id]['received'] += 1
     return jsonify({"ok": True, "received": chunk_index})
 
 @app.route('/api/upload/finalize', methods=['POST'])
@@ -338,22 +341,13 @@ def finalize_upload():
     if upload_id not in chunk_uploads:
         return jsonify({"error": "Upload session not found"}), 404
 
-    info  = chunk_uploads[upload_id]
-    total = info['total']
-
-    safe_name = werkzeug.utils.secure_filename(filename) or f"upload_{int(time.time())}"
-    temp_path = f"/tmp/assembled_{upload_id}_{safe_name}"
+    temp_path = os.path.join(UPLOAD_FOLDER, f"{upload_id}.part")
 
     try:
-        with open(temp_path, 'wb') as out:
-            for i in range(total):
-                cp = info['chunks'].get(i)
-                if not cp:
-                    return jsonify({"error": f"Missing chunk {i}"}), 400
-                with open(cp, 'rb') as cf:
-                    out.write(cf.read())
-                os.remove(cp)
         del chunk_uploads[upload_id]
+        
+        if not os.path.exists(temp_path):
+            return jsonify({"error": "Temporary file missing"}), 400
 
         file_data = _do_cloudinary_upload(temp_path, filename, group)
         c_files = load_files()
@@ -365,7 +359,8 @@ def finalize_upload():
         return jsonify({"error": str(e)}), 500
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            try: os.remove(temp_path)
+            except: pass
 
 # ─── Workspaces ───────────────────────────────────────────────────────────────
 
