@@ -510,6 +510,11 @@ def handle_disconnect():
     to_remove = [k for k, v in online_uploaders.items() if v['sid'] == request.sid]
     for k in to_remove:
         del online_uploaders[k]
+    # Editor room cleanup
+    for pid, users in list(editor_rooms.items()):
+        if request.sid in users:
+            del users[request.sid]
+            emit('editor_users', {'public_id': pid, 'users': users}, to=f"edit_{pid}")
 
 def _emit_voice_update(code):
     """Send voice channel state to all members of a workspace."""
@@ -669,15 +674,42 @@ def handle_delete_file(data):
         save_files(c_files)
         emit('file_deleted', {'public_id': public_id}, to=code)
 
+editor_rooms = {} # public_id -> {sid: {name, avatar}}
+
+@socketio.on('join_edit')
+def handle_join_edit(data):
+    code = str(data.get('code', '')).upper()
+    pid = data.get('public_id')
+    if not pid: return
+    room_id = f"edit_{pid}"
+    join_room(room_id)
+    
+    if pid not in editor_rooms:
+        editor_rooms[pid] = {}
+    editor_rooms[pid][request.sid] = {'name': data.get('name', 'Anon'), 'avatar': data.get('avatar', '')}
+    
+    emit('editor_users', {'public_id': pid, 'users': editor_rooms[pid]}, to=room_id)
+
+@socketio.on('leave_edit')
+def handle_leave_edit(data):
+    pid = data.get('public_id')
+    if pid and pid in editor_rooms:
+        room_id = f"edit_{pid}"
+        leave_room(room_id)
+        if request.sid in editor_rooms[pid]:
+            del editor_rooms[pid][request.sid]
+            emit('editor_users', {'public_id': pid, 'users': editor_rooms[pid]}, to=room_id)
+
 @socketio.on('file_edit')
 def handle_file_edit(data):
-    code = str(data.get('code', '')).upper()
-    if code in workspaces:
+    pid = data.get('public_id')
+    if pid:
+        room_id = f"edit_{pid}"
         emit('file_edited', {
-            'public_id': data.get('public_id'),
+            'public_id': pid,
             'text': data.get('text'),
             'sid': request.sid
-        }, to=code, include_self=False)
+        }, to=room_id, include_self=False)
 
 @socketio.on('kick_user')
 def handle_kick_user(data):
