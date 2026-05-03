@@ -8,6 +8,7 @@ import threading
 import random
 import string
 import traceback
+import hashlib
 from functools import wraps
 import werkzeug.utils
 
@@ -399,11 +400,10 @@ def get_workspace(code):
     code = code.upper()
     ws = workspaces.get(code)
     if not ws:
-        # Auto-create so any code works as a room
         workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': [], 'voice_channels': DEFAULT_VOICE_CHANNELS[:]}
         save_workspaces()
         ws = workspaces[code]
-    return jsonify({"code": code, "name": ws['name']})
+    return jsonify({"code": code, "name": ws['name'], "locked": bool(ws.get('password_hash'))})
 
 # ─── Admin ────────────────────────────────────────────────────────────────────
 
@@ -468,18 +468,28 @@ def handle_join_workspace(data):
     code = str(data.get('code', '')).upper()
     name = str(data.get('name', 'Anonymous'))[:30]
     avatar = str(data.get('avatar', ''))
+    password = str(data.get('password', ''))
     if not code: return
 
-    join_room(code)
-    workspace_members.setdefault(code, {})[request.sid] = {'name': name, 'avatar': avatar}
-
-    # Auto-create workspace if it doesn't exist (survives server restarts)
+    # Auto-create workspace if it doesn't exist
     if code not in workspaces:
         workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': [], 'voice_channels': DEFAULT_VOICE_CHANNELS[:]}
         save_workspaces()
 
-    # Send chat history
     ws = workspaces.get(code, {})
+
+    # Password check
+    stored_hash = ws.get('password_hash')
+    if stored_hash:
+        supplied_hash = hashlib.sha256(password.encode()).hexdigest() if password else ''
+        if supplied_hash != stored_hash:
+            emit('auth_error', {'code': code, 'reason': 'wrong_password' if password else 'password_required'})
+            return
+
+    join_room(code)
+    workspace_members.setdefault(code, {})[request.sid] = {'name': name, 'avatar': avatar}
+
+    # Send chat history
     emit('chat_history', ws.get('messages', [])[-200:])
 
     # Send member list to everyone
@@ -488,6 +498,22 @@ def handle_join_workspace(data):
 
     # Announce join
     emit('user_join', {'sid': request.sid, 'name': name, 'avatar': avatar}, to=code, include_self=False)
+
+@socketio.on('set_workspace_password')
+def handle_set_workspace_password(data):
+    """Admin sets or clears workspace password."""
+    code = str(data.get('code', '')).upper()
+    password = str(data.get('password', '')).strip()
+    if not code or code not in workspaces: return
+    ws = workspaces[code]
+    if password:
+        ws['password_hash'] = hashlib.sha256(password.encode()).hexdigest()
+        emit('workspace_locked', {'code': code, 'locked': True}, to=code)
+    else:
+        ws.pop('password_hash', None)
+        emit('workspace_locked', {'code': code, 'locked': False}, to=code)
+    save_workspaces()
+    emit('notify', {'msg': f'🔒 Workspace password {"set" if password else "removed"} by admin.'}, to=code)
 
 @socketio.on('disconnect')
 def handle_disconnect():
