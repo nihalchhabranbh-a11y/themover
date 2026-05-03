@@ -497,7 +497,7 @@ def handle_disconnect():
             name = members[request.sid]['name']
             del members[request.sid]
             emit('user_leave', {'sid': request.sid, 'name': name}, to=code)
-            ml = [{'sid': s, 'name': v['name']} for s, v in members.items()]
+            ml = [{'sid': s, 'name': v['name'], 'avatar': v.get('avatar', '')} for s, v in members.items()]
             emit('members_list', ml, to=code)
     # Remove from voice channels
     for code, channels in list(voice_channels.items()):
