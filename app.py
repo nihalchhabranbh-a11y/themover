@@ -628,6 +628,18 @@ def handle_voice_reaction(data):
         emit('voice_reaction', {'emoji': data.get('emoji', '👍'), 'name': data.get('name', '')},
              to=code, include_self=False)
 
+@socketio.on('movie_action')
+def handle_movie_action(data):
+    code = str(data.get('code', '')).upper()
+    if code:
+        emit('movie_action', data, to=code, include_self=False)
+
+@socketio.on('movie_reaction')
+def handle_movie_reaction(data):
+    code = str(data.get('code', '')).upper()
+    if code:
+        emit('movie_reaction', data, to=code, include_self=False)
+
 # ─── Live Chat ────────────────────────────────────────────────────────────────
 
 @socketio.on('chat_message')
