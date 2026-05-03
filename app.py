@@ -400,7 +400,7 @@ def get_workspace(code):
     ws = workspaces.get(code)
     if not ws:
         # Auto-create so any code works as a room
-        workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': []}
+        workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': [], 'voice_channels': DEFAULT_VOICE_CHANNELS[:]}
         save_workspaces()
         ws = workspaces[code]
     return jsonify({"code": code, "name": ws['name']})
@@ -474,7 +474,7 @@ def handle_join_workspace(data):
 
     # Auto-create workspace if it doesn't exist (survives server restarts)
     if code not in workspaces:
-        workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': []}
+        workspaces[code] = {'name': code, 'created_at': time.time(), 'messages': [], 'voice_channels': DEFAULT_VOICE_CHANNELS[:]}
         save_workspaces()
 
     # Send chat history
@@ -514,8 +514,10 @@ def _emit_voice_update(code):
     """Send voice channel state to all members of a workspace."""
     ch_info = {ch: [{'sid': sid, 'name': name} for sid, name in members.items()]
                for ch, members in voice_channels.get(code, {}).items()}
-    # Always include defaults
-    for ch in DEFAULT_VOICE_CHANNELS:
+    # Always include workspace's custom/default channels
+    ws = workspaces.get(code, {})
+    ws_channels = ws.get('voice_channels', DEFAULT_VOICE_CHANNELS)
+    for ch in ws_channels:
         if ch not in ch_info:
             ch_info[ch] = []
     emit('voice_channel_update', {'channels': ch_info}, to=code)
@@ -545,6 +547,54 @@ def handle_join_voice_channel(data):
 
     # Broadcast updated channel list to workspace
     _emit_voice_update(code)
+
+@socketio.on('create_voice_channel')
+def handle_create_voice_channel(data):
+    code = str(data.get('code', '')).upper()
+    channel = str(data.get('channel', '')).strip()[:30]
+    if not code or not channel: return
+    ws = workspaces.get(code)
+    if ws:
+        if 'voice_channels' not in ws:
+            ws['voice_channels'] = DEFAULT_VOICE_CHANNELS[:]
+        if channel not in ws['voice_channels']:
+            ws['voice_channels'].append(channel)
+            save_workspaces()
+            _emit_voice_update(code)
+
+@socketio.on('rename_voice_channel')
+def handle_rename_voice_channel(data):
+    code = str(data.get('code', '')).upper()
+    old_ch = str(data.get('old_channel', '')).strip()
+    new_ch = str(data.get('new_channel', '')).strip()[:30]
+    if not code or not old_ch or not new_ch: return
+    ws = workspaces.get(code)
+    if ws and 'voice_channels' in ws:
+        if old_ch in ws['voice_channels'] and new_ch not in ws['voice_channels']:
+            idx = ws['voice_channels'].index(old_ch)
+            ws['voice_channels'][idx] = new_ch
+            save_workspaces()
+            # Move active users
+            if code in voice_channels and old_ch in voice_channels[code]:
+                voice_channels[code][new_ch] = voice_channels[code].pop(old_ch)
+                # Tell everyone to re-join to fix WebRTC mapping
+                emit('force_voice_leave', {}, to=code)
+            _emit_voice_update(code)
+
+@socketio.on('delete_voice_channel')
+def handle_delete_voice_channel(data):
+    code = str(data.get('code', '')).upper()
+    channel = str(data.get('channel', '')).strip()
+    if not code or not channel: return
+    ws = workspaces.get(code)
+    if ws and 'voice_channels' in ws:
+        if channel in ws['voice_channels']:
+            ws['voice_channels'].remove(channel)
+            save_workspaces()
+            if code in voice_channels and channel in voice_channels[code]:
+                del voice_channels[code][channel]
+                emit('force_voice_leave', {}, to=code)
+            _emit_voice_update(code)
 
 @socketio.on('leave_voice_channel')
 def handle_leave_voice_channel(data):
