@@ -467,10 +467,11 @@ def get_client_ip():
 def handle_join_workspace(data):
     code = str(data.get('code', '')).upper()
     name = str(data.get('name', 'Anonymous'))[:30]
+    avatar = str(data.get('avatar', ''))
     if not code: return
 
     join_room(code)
-    workspace_members.setdefault(code, {})[request.sid] = {'name': name}
+    workspace_members.setdefault(code, {})[request.sid] = {'name': name, 'avatar': avatar}
 
     # Auto-create workspace if it doesn't exist (survives server restarts)
     if code not in workspaces:
@@ -482,11 +483,11 @@ def handle_join_workspace(data):
     emit('chat_history', ws.get('messages', [])[-200:])
 
     # Send member list to everyone
-    members = [{'sid': sid, 'name': v['name']} for sid, v in workspace_members.get(code, {}).items()]
+    members = [{'sid': sid, 'name': v['name'], 'avatar': v.get('avatar', '')} for sid, v in workspace_members.get(code, {}).items()]
     emit('members_list', members, to=code)
 
     # Announce join
-    emit('user_join', {'sid': request.sid, 'name': name}, to=code, include_self=False)
+    emit('user_join', {'sid': request.sid, 'name': name, 'avatar': avatar}, to=code, include_self=False)
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -626,10 +627,11 @@ def handle_voice_reaction(data):
 
 @socketio.on('chat_message')
 def handle_chat_message(data):
-    code = str(data.get('code', '')).upper()
+    code = str(data.get('code', ''))
     msg  = {
         'text':      str(data.get('text', ''))[:2000],
         'name':      str(data.get('name', 'Anonymous'))[:30],
+        'avatar':    str(data.get('avatar', '')),
         'file_url':  data.get('file_url'),
         'file_name': data.get('file_name'),
         'time':      time.time()
