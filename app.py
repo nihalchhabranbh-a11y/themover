@@ -499,6 +499,26 @@ def handle_join_workspace(data):
     # Announce join
     emit('user_join', {'sid': request.sid, 'name': name, 'avatar': avatar}, to=code, include_self=False)
 
+@socketio.on('update_profile')
+def handle_update_profile(data):
+    code = str(data.get('code', '')).upper()
+    name = str(data.get('name', 'Anonymous'))[:30]
+    avatar = str(data.get('avatar', ''))
+    if not code or code not in workspace_members: return
+    if request.sid in workspace_members[code]:
+        workspace_members[code][request.sid] = {'name': name, 'avatar': avatar}
+        
+        # Broadcast new members list
+        members = [{'sid': sid, 'name': v['name'], 'avatar': v.get('avatar', '')} for sid, v in workspace_members[code].items()]
+        emit('members_list', members, to=code)
+        
+        # Update in voice channels if present
+        for ch, voice_members in voice_channels.get(code, {}).items():
+            if request.sid in voice_members:
+                voice_members[request.sid]['name'] = name
+                voice_members[request.sid]['avatar'] = avatar
+        _emit_voice_update(code)
+
 @socketio.on('set_workspace_password')
 def handle_set_workspace_password(data):
     """Admin sets or clears workspace password."""
